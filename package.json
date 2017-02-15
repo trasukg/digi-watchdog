@@ -1,0 +1,27 @@
+{
+  "name": "digi-watchdog",
+  "version": "1.0.0",
+  "description": "A Watchdog system for the APRS Digipeater",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "digi-watchdog": "./index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trasukg/digi-watchdog.git"
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/trasukg/digi-watchdog/issues"
+  },
+  "homepage": "https://github.com/trasukg/digi-watchdog#readme",
+  "dependencies": {
+    "node-getopt": "^0.2.3",
+    "serialport": "^4.0.7",
+    "utils-for-aprs": "^2.1.1"
+  }
+}
