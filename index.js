@@ -26,18 +26,27 @@ var util=require('util');
 var SocketKISSFrameEndpoint=require('utils-for-aprs').SocketKISSFrameEndpoint;
 var APRSProcessor=require('utils-for-aprs').APRSProcessor;
 var RemoteModeStateMachine=require("./RemoteModeStateMachine");
+var RepeaterSiteModeStateMachine=require("./RepeaterSiteModeStateMachine");
 var ax25utils=require('utils-for-aprs').ax25utils;
+var exec=require('child_process').exec;
 
-console.log("process.argv=" + process.argv);
+var getopt=require('node-getopt').create([
+  ['', 'repeater-site', 'enable repeater-site mode']
+]).bindHelp();
 
-if (process.argv.length != 3) {
-  console.log("Usage: digi-watchdog [--repeater-site] <host>:<port>");
+var opt=getopt.parseSystem();
+
+console.log("opt.argv=" + opt.argv);
+
+if (opt.argv.length != 1) {
+  getopt.showHelp()
   return;
 }
 
-var res=/([^\:]+):([0-9]+)/.exec(process.argv[2]);
+var res=/([^\:]+):([0-9]+)/.exec(opt.argv[0]);
 if(!res) {
-  console.log("Usage: digi-watchdog [--repeater-site] <host>:<port>");
+  getopt.showHelp()
+  return;
 }
 var host=res[1];
 var port=res[2];
@@ -70,23 +79,50 @@ var ve3rsbInPath=function(frame) {
   return false;
 }
 
-var stateMachine=new RemoteModeStateMachine( { failureTime: 1*60 });
+var ve3rsbNotInSource=function(frame) {
+  return(!frame.forwardingRepeaterPath && frame.source.callsign != 'VE3RSB');
+}
 
-stateMachine.on('failed', function() {
-  console.log("Digipeater appears to have failed");
-  // TODO: Fire off an email here...
-});
-stateMachine.on('recovered', function() {
-  console.log("Digipeater appears to have come back online.");
-  // TODO: Fire off an email here...
-});
+var stateMachine, filter;
+
+if (opt.options['repeater-site']) {
+  console.log('Repeater site mode was selected');
+  filter=ve3rsbNotInSource;
+  stateMachine=new RepeaterSiteModeStateMachine( {
+    failureTime: 10*60,
+    holdoffTime: 240*60
+  });
+  stateMachine.on('failed', function() {
+    console.log("Digipeater appears to have failed")
+    powerCycleRepeater();
+  });
+  stateMachine.on('recovered', function() {
+    console.log("Digipeater appears to have come back online.");
+  });
+  stateMachine.on('failedInHoldoff', function() {
+    console.log("Digipeater appears to have failed while in holdoff.");
+  });
+
+} else {
+  console.log('Remote site mode was selected');
+  filter=ve3rsbInPath;
+  stateMachine=new RemoteModeStateMachine( { failureTime: 8*60 });
+  stateMachine.on('failed', function() {
+    console.log("Digipeater appears to have failed");
+    // TODO: Fire off an email here...
+  });
+  stateMachine.on('recovered', function() {
+    console.log("Digipeater appears to have come back online.");
+    // TODO: Fire off an email here...
+  });
+}
 
 // When we get data on the aprsProcessor, show it on the console.
 aprsProcessor.on('aprsData', function(frame) {
   // Filter frame to see if it matches the criteria.
-  if (ve3rsbInPath(frame)) {
+  if (filter(frame)) {
     stateMachine.trigger();
-    console.log( "Good: " + ax25utils.addressToString(frame.source) +
+    /*console.log( "Good: " + ax25utils.addressToString(frame.source) +
     '->' + ax25utils.addressToString(frame.destination) +
     ' (' + ax25utils.repeaterPathToString(frame.repeaterPath) + ')' +
     ((frame.forwardingSource!=undefined)?(
@@ -94,9 +130,9 @@ aprsProcessor.on('aprsData', function(frame) {
       '->' + ax25utils.addressToString(frame.forwardingDestination) +
       ' (' + ax25utils.repeaterPathToString(frame.forwardingRepeaterPath) + ')')
       : '') +
-      frame.info);
+      frame.info);*/
   } else {
-    console.log( "Didn't qualify: " + ax25utils.addressToString(frame.source) +
+    /*console.log( "Didn't qualify: " + ax25utils.addressToString(frame.source) +
     '->' + ax25utils.addressToString(frame.destination) +
     ' (' + ax25utils.repeaterPathToString(frame.repeaterPath) + ')' +
     ((frame.forwardingSource!=undefined)?(
@@ -104,7 +140,7 @@ aprsProcessor.on('aprsData', function(frame) {
       '->' + ax25utils.addressToString(frame.forwardingDestination) +
       ' (' + ax25utils.repeaterPathToString(frame.forwardingRepeaterPath) + ')')
       : '') +
-      frame.info);
+      frame.info);*/
   }
 });
 aprsProcessor.on('error', function(err, frame) {
@@ -113,8 +149,6 @@ aprsProcessor.on('error', function(err, frame) {
 });
 
 // The endpoint provides de-escaped KISS frames.  Pass them on to the aprsProcessor
-
-
 // Log interesting events...
 endpoint.on('connect', function(connection) {
   console.log("Connected to port " + endpoint.port);
@@ -126,8 +160,16 @@ endpoint.on('connect', function(connection) {
   });
 });
 
-
-
 // Turn on the endpoint.  It will attempt to connect in a persistent fashion.
 stateMachine.start();
 endpoint.enable();
+
+var powerCycleRepeater=function() {
+  var ps=exec('power-cycle repeater 10 --dry-run --comment "Watchdog was triggered"');
+  ps.stdout.on('data', function(out) {
+    console.log(out.toString());
+  });
+  ps.stderr.on('data', function(out) {
+    console.log(out.toString());
+  });
+}
