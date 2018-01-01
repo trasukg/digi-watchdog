@@ -31,7 +31,8 @@ var ax25utils=require('utils-for-aprs').ax25utils;
 var exec=require('child_process').exec;
 
 var getopt=require('node-getopt').create([
-  ['', 'repeater-site', 'enable repeater-site mode']
+  ['', 'repeater-site', 'enable repeater-site mode'],
+  ['', 'active', 'enable active reset mode (sends power-cycle to repeater)']
 ]).bindHelp();
 
 var opt=getopt.parseSystem();
@@ -103,16 +104,38 @@ if (opt.options['repeater-site']) {
     console.log("Digipeater appears to have failed while in holdoff.");
   });
 
-} else {
+} else if (opt.options['active']) {
+
+  console.log('Remote site mode with active reset was selected');
+  filter=ve3rsbInPath;
+  stateMachine=new RepeaterSiteModeStateMachine( {
+    failureTime: 10*60,
+    holdoffTime: 240*60
+  });
+  stateMachine.on('failed', function() {
+    console.log("Digipeater appears to have failed at " + new Date().toString());
+    powerCycleRepeaterWithSSH();
+  });
+  stateMachine.on('recovered', function() {
+    console.log("Digipeater appears to have come back online at "
+    + new Date().toString());
+  });
+  stateMachine.on('failedInHoldoff', function() {
+    console.log("Digipeater appears to have failed while in holdoff at "
+    + new Date().toString());
+  });
+}
+else {
   console.log('Remote site mode was selected');
   filter=ve3rsbInPath;
   stateMachine=new RemoteModeStateMachine( { failureTime: 8*60 });
   stateMachine.on('failed', function() {
-    console.log("Digipeater appears to have failed");
+    console.log("Digipeater appears to have failed at " + new Date().toString());
     // TODO: Fire off an email here...
   });
   stateMachine.on('recovered', function() {
-    console.log("Digipeater appears to have come back online.");
+    console.log("Digipeater appears to have come back online at "
+    + new Date().toString());
     // TODO: Fire off an email here...
   });
 }
@@ -165,7 +188,18 @@ stateMachine.start();
 endpoint.enable();
 
 var powerCycleRepeater=function() {
-  var ps=exec('power-cycle repeater 10 --dry-run --comment "Watchdog was triggered"');
+  var ps=exec('sudo power-cycle repeater 10 --comment "Watchdog was triggered"');
+  ps.stdout.on('data', function(out) {
+    console.log(out.toString());
+  });
+  ps.stderr.on('data', function(out) {
+    console.log(out.toString());
+  });
+}
+
+var powerCycleRepeaterWithSSH=function() {
+  console.log("Issuing command to power-cycle the repeater.");
+  var ps=exec('ssh barcpi003 "sudo power-cycle repeater 10 --comment \\\"Automatic reset of TT4\\\""');
   ps.stdout.on('data', function(out) {
     console.log(out.toString());
   });
